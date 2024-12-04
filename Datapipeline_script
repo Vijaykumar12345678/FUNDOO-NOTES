@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: 'dev', 
+                    url: 'https://github.com/Vijaykumar12345678/Fundoo-Notes.git'
+            }
+        }
+
+        stage('Sync to App Server') {
+            steps {
+                sh """
+                rsync -avz \$WORKSPACE ubuntu@172.31.28.123:/tmp
+                """
+            }
+        }
+
+        stage('Setup Virtual Environment on App Server') {
+            steps {
+                sh """
+                ssh ubuntu@172.31.28.123 'bash -c "
+                    # Stop the application service
+                    sudo systemctl stop fundoo_notes.service
+
+                    # Copy files to the application directory
+                    cp -rfv /tmp/FUNDOO-NOTES-DATAPIPELINE/* /home/ubuntu/FUNDOO-NOTES1/
+
+                    # Activate virtual environment and install dependencies
+                    source /home/ubuntu/myenv/bin/activate
+                    pip install -r /home/ubuntu/FUNDOO-NOTES1/requirements.txt
+                "'
+                """
+            }
+        }
+
+        stage('Apply Migrations on App Server') {
+            steps {
+                sh """
+                ssh ubuntu@172.31.28.123 'bash -c "
+                    source /home/ubuntu/myenv/bin/activate
+                    python /home/ubuntu/FUNDOO-NOTES1/manage.py makemigrations
+                    python /home/ubuntu/FUNDOO-NOTES1/manage.py migrate
+                "'
+                """
+            }
+        }
+
+        stage('Start Application') {
+            steps {
+                sh """
+                ssh ubuntu@172.31.28.123 'bash -c "
+                    suod systemctl daemon-reload
+                    sudo systemctl start fundoo_notes.service
+                    sudo systemctl status fundoo_notes.service
+                "'
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution completed.'
+        }
+        success {
+            echo 'Pipeline executed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Please check the logs.'
+        }
+    }
+}
